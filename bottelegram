@@ -1,0 +1,362 @@
+from math import e
+from turtle import update
+import telebot
+import pandas as pd
+import os
+import sys
+from datetime import date
+from fileinput import filename
+import logging
+from tokenize import Token
+import telegram      #PARA VER LO QUE HACE EL BOT
+from telegram.ext import (Updater, CommandHandler, MessageHandler, Filters)
+import mysql.connector
+import matplotlib.pyplot as plt 
+import openpyxl
+from openpyxl import Workbook
+from telegram.ext.callbackcontext import CallbackContext
+from openpyxl.styles import Font
+from openpyxl.chart import ScatterChart, Reference, Series,PieChart
+import time
+
+db = mysql.connector.connect(
+    host = "localhost",
+    user = "root",
+    password = "" ,
+    port = 3306, # Opcional por defecto 3306
+    database= "ingresos_gastos", # Opcional
+)
+
+#cursor = db.cursor(dictionary=True)
+#db.commit()
+#cursor.close()
+#datos = pd.read_csv('C:/Users/ACER/OneDrive/Documentos/BDII/bottelegram/contable.csv', header= None)
+
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s,"
+)
+logger =logging.getLogger()
+
+def start(update, context):
+    ''' START '''
+	# Enviar un mensaje a un ID determinado.
+    print(update.message.from_user.id)
+    bot = context.bot
+    userName = update.effective_user["first_name"]
+    update.message.reply_text(f'Hola {userName} gracias por invocarme con el comando /getbotinfo podras ver para que me crearon gracias ')
+
+
+def welcomeMsg(update, context):
+    bot = context.bot
+    chatId = update.message.chat_id
+    updateMsg = getattr(update,"message", None)
+    for user in updateMsg.new_chat_members:
+        userName = user.first_name
+
+    logger.info(f'El usuario {userName} ha ingresado al grupo')
+    bot.sendMessage(
+        chat_id = chatId,
+        text = f'Bienvenido al grupo de {userName} espero que lo disfrutes y te sea de mucha ayuda'
+    )
+
+
+def getBotInfo(update, context):
+    bot = context.bot
+    chatId = update.message.chat_id
+    userName = update.effective_user["first_name"]
+    logger.info(f'El usuario {userName} ha solicitado informacion sobre el bot')
+    bot.sendMessage(
+        chat_id = chatId,
+        text = f'Hola {userName} soy un bot creado por Harry Chaux Pantoja estudiante de V semestre, estoy aqui para ayudarte con tu contabilidad mensual, aqui podras llevar tus INGRESOS y los GASTOS que haces en el MES y te ayudare a que los veas mediante unas graficas... para saber todos mis comandos escribe /help '        #este comando <b> es para poner negrilla en el texto
+    )
+
+def help(update, context):
+	''' comandos '''
+	
+	context.bot.send_message(update.message.chat_id,"Bienvenido \n acontinuacion te mostrare mis comandos \n /ingresar_sueldo : con este guardaras tus ingresos en la base de datos, con este ingresas valor descripcion fecha por ejemplo de como usarlo es: /ingresar_sueldo 450500 descripcion 2022-25-01 \n /ver_sueldos : con este te mostrare todos los gastos que vas guardando en la base de datos en un excel \n /calcular_ingresos : con este te dare un valor exacto de los INGRESOS SUELDO que subes a la base de datos generadolo en un excel para mas facilidad \n /ingresar_gasto : con este guardaras tus gastos en la base de datos, con este ingresas valor descripcion fecha por ejemplo de como usarlo es: /ingresar_gasto 5300 descripcion 2022-25-01 \n /ver_gastos : con este te mostrare todos los gastos que vas guardando en la base de datos en un excel \n /calcular_gasto : con este te dare un valor exacto de los GASTOS que subes a la base de datos generadolo en un excel para mas facilidad \n /grafica : con este te generare un excel mostrandote una grafica pastel de tus gastos \n GRACIAS POR SU ATENCION ESTARE ATENTO A SU COMANDO")
+
+
+def grafica(update,context):
+    bot = context.bot
+    chatId = update.message.chat_id
+    userName = update.effective_user["first_name"]
+    updateMsg = getattr(update,"message", None)
+    for user in updateMsg.new_chat_members:
+        userName = user.first_name
+    user = update.message.from_user.id 	
+    cursor = db.cursor()
+    cursor.execute("SELECT ingresar_gasto,descripcion,fecha FROM gastos where id_usuario=%s",(user,))
+    ingreso= cursor.fetchall()	
+    book = Workbook()
+    sheet = book.active
+    
+    sheet['A1'] = "MONTO"
+    sheet['B1'] = 'DESCRIPCION'
+    sheet['C1'] = 'FECHA'
+
+    for i,value in enumerate(ingreso):
+        sheet[f'A{i+2}'] = value[0]
+        sheet[f'B{i+2}'] = value[1]
+        sheet[f'C{i+2}'] = value[2]
+
+    wb = openpyxl.Workbook() 
+    sheet = wb.active 
+  
+    for row in ingreso: 
+        sheet.append(row)   
+    chart = PieChart()   
+    labels = Reference(sheet, min_col = 1, 
+                   min_row = 2, max_row = len(ingreso)) 
+                     
+    data = Reference(sheet, min_col = 1, 
+                   min_row = 1, max_row = len(ingreso)) 
+  
+    chart.add_data(data, titles_from_data = True)   
+    chart.set_categories(labels) 
+    chart.title = " GASTOS "
+    sheet.add_chart(chart, "D1") 
+    wb.save("torta_de_gastos.xlsx")
+    context.bot.send_document(update.message.chat_id,document=open("torta_de_gastos.xlsx","rb"),filename="torta_de_gastos.xlsx") 
+    bot.sendMessage(
+        chat_id = chatId,
+        text = f'Hola {userName}, estos son tus gastos mostradas en una grafica torta '
+    )
+
+
+
+def suma(update,context):
+    user = update.message.from_user.id
+    bot = context.bot
+    chatId = update.message.chat_id
+    userName = update.effective_user["first_name"]
+    updateMsg = getattr(update,"message", None)
+    for user in updateMsg.new_chat_members:
+        userName = user.first_name
+    cursor = db.cursor()
+    cursor.execute("SELECT SUM(valor_a_ingresar)AS suma FROM ingresos where id_usuario=%s ",(user,))
+    suma= cursor.fetchone()
+    db.commit()
+    bot.sendMessage(
+        chat_id = chatId,
+        text = f'Hola {userName}, este es el total de tus ingresos '+str(suma[0])
+    )
+
+def calcular_gastos(update,context):
+    user = update.message.from_user.id
+    bot = context.bot
+    chatId = update.message.chat_id
+    userName = update.effective_user["first_name"]
+    updateMsg = getattr(update,"message", None)
+    for user in updateMsg.new_chat_members:
+        userName = user.first_name
+    cursor = db.cursor()
+    cursor.execute("SELECT SUM(ingresar_gasto)AS GASTOS FROM gastos where id_usuario=%s ",(user,))
+    sumagasto=cursor.fetchone()
+    db.commit()
+    bot.sendMessage(
+        chat_id = chatId,
+        text = f'Hola {userName}, la sumatoria de tus gastos es de '+str(sumagasto[0])
+    )
+
+
+def ingresar_gasto(update,context):
+    user = update.message.from_user.id
+    bot = context.bot
+    chatId = update.message.chat_id
+    userName = update.effective_user["first_name"]
+    updateMsg = getattr(update,"message", None)
+    for user in updateMsg.new_chat_members:
+        userName = user.first_name
+    valor1 = int(context.args[0])
+    descripcion=context.args[1]
+    fecha = context.args[2]
+    cursor = db.cursor()
+    cursor.execute("INSERT INTO gastos (id_usuario,ingresar_gasto,descripcion,fecha)VALUES (%s,%s,%s,%s)", (user,valor1,descripcion,fecha))
+    db.commit()
+    logger.info(f'El usuario {userName} ha ingresado un gasto a la base de datos')
+    bot.sendMessage(
+        chat_id = chatId,
+        text = f'Hola {userName}, has ingresado un gasto a la base de datos'
+    )
+        
+
+def ver_gastos(update,context):
+    bot = context.bot
+    chatId = update.message.chat_id
+    userName = update.effective_user["first_name"]
+    updateMsg = getattr(update,"message", None)
+    for user in updateMsg.new_chat_members:
+        userName = user.first_name
+    user = update.message.from_user.id  	
+    cursor = db.cursor()
+    cursor.execute("SELECT ingresar_gasto,descripcion,fecha FROM gastos where id_usuario=%s",(user,))
+    ingresos= cursor.fetchall()
+    texto=""
+    for database in ingresos:
+        	
+        texto =str(database[0])+" "+str(database[1])+" "+str(database[2])
+        print(database)
+	
+    book = Workbook()
+    sheet = book.active
+
+    sheet['A1'] = "MONTO"
+    sheet['B1'] = 'DESCRIPCION'
+    sheet['C1'] = 'FECHA'
+
+    for i,value in enumerate(ingresos):
+
+        sheet[f'A{i+2}'] = value[0]
+        sheet[f'B{i+2}'] = value[1]
+        sheet[f'C{i+2}'] = value[2]	
+
+    book.save('gastos.xlsx')
+    context.bot.send_document(update.message.chat_id,document=open("gastos.xlsx","rb"),filename="gastos.xlsx")
+    bot.sendMessage(
+        chat_id = chatId,
+        text = f'Hola {userName}, estos son tus gastos'
+    )
+    
+def ingresar_sueldo(update,context):
+    user = update.message.from_user.id
+    bot = context.bot
+    chatId = update.message.chat_id
+    userName = update.effective_user["first_name"]
+    updateMsg = getattr(update,"message", None)
+    for user in updateMsg.new_chat_members:
+        userName = user.first_name
+    logger.info(f'El usuario {userName} ha ingresado un sueldo a la base de datos')
+    valor1 = int(context.args[0])
+    descripcion=context.args[1]
+    fecha = context.args[2]
+    cursor = db.cursor()
+    cursor.execute("INSERT INTO ingresos (id_user,valor_a_ingresar,descripcion,fecha)VALUES (%s,%s,%s,%s)", (user,valor1,descripcion,fecha))
+    db.commit()
+
+def ver_sueldos(update,context):
+    bot = context.bot
+    chatId = update.message.chat_id
+    userName = update.effective_user["first_name"]
+    updateMsg = getattr(update,"message", None)
+    for user in updateMsg.new_chat_members:
+        userName = user.first_name
+    user = update.message.from_user.id  	
+    cursor = db.cursor()
+    cursor.execute("SELECT valor_a_ingresar,descripcion,fecha FROM ingresos where id_usuario=%s",(user,))
+    ingresos= cursor.fetchall()
+    texto=""
+    for database in ingresos:
+        	
+        texto =str(database[0])+" "+str(database[1])+" "+str(database[2])
+        print(database)
+	
+    book = Workbook()
+    sheet = book.active
+
+    sheet['A1'] = "MONTO"
+    sheet['B1'] = 'DESCRIPCION'
+    sheet['C1'] = 'FECHA'
+
+    for i,value in enumerate(ingresos):
+
+        sheet[f'A{i+2}'] = value[0]
+        sheet[f'B{i+2}'] = value[1]
+        sheet[f'C{i+2}'] = value[2]	
+
+    book.save('ingresos.xlsx')
+    context.bot.send_document(update.message.chat_id,document=open("ingresos.xlsx","rb"),filename="ingresos.xlsx")
+    bot.sendMessage(
+        chat_id = chatId,
+        text = f'Hola {userName}, estos son los datos que guardaste en la base de datos '
+    )
+    
+    """
+def ingresos_mes(update,context):
+    bot = context.bot
+    chatId = update.message.chat_id
+    userName = update.effective_user["first_name"]
+    updateMsg = getattr(update,"message", None)
+    for user in updateMsg.new_chat_members:
+        userName = user.first_name
+    logger.info(f'El usuario {userName} ha ingresado un sueldo a la base de datos')
+
+    fecha1 = context.args[0]
+    fecha2 = context.args[1]
+
+    user = update.message.from_user.id
+    cursor = db.cursor()
+    cursor.execute("SELECT  valor_a_ingresar,descripcion,fecha from ingresos WHERE fecha>=%s AND fecha<=%s AND id_user=%s",(fecha1,fecha2,user,))
+    ingreso= cursor.fetchall()
+
+    book = Workbook()
+    sheet = book.active
+
+    sheet['A1'] = "valor a ingresar"
+	
+    sheet['B1'] = 'descripcion'
+
+    sheet['C1'] = 'fecha'
+
+    
+    for i,value in enumerate(ingreso):
+        sheet[f'A{i+2}'] = value[0]
+        sheet[f'B{i+2}'] = value[1]
+        sheet[f'C{i+2}'] = value[2]
+    book.save('ingresos_mes.xlsx')		
+    context.bot.send_document(update.message.chat_id,document=open("ingresos_mes.xlsx","rb"),filename="ingresos_mes.xlsx") 	
+    bot.sendMessage(
+        chat_id = chatId,
+        text = f'Hola {userName},te he generado un documento de excel con tus ingresos del mes que dijitaste '
+    )
+
+	
+
+def echo(update, context):
+    bot = context.bot
+    updateMsg = getattr(update, 'message', None)
+    messageId = updateMsg.message_id
+    chatId = update.message.chat_id
+    userName = update.effective_user['first_name']
+    text = update.message.text
+    logger.info(f'El usuario {userName} ha enviado un nuevo mensaje al grupo {chatId}')
+"""
+def userisAdmin(chatId, userId, bot):
+    try:
+        groupAdmins = bot.get_chat_administrators(chatId)
+        for admin in groupAdmins:
+            if admin.user.id == userId:
+                isAdmin = True
+            else:
+                isAdmin = False
+                
+        return isAdmin
+    except Exception as es:
+        print(e)
+
+if __name__ == "__main__":
+    TOKEN="5356102560:AAHTOgWF0Hlo58jWnkWRIfYEoEHyNgkd1ks"
+    #updater se conecta y recibe los mensajes
+    updater = Updater(TOKEN, use_context=True)
+
+    #create dispather
+    dp = updater.dispatcher
+
+    #create command
+    
+    dp.add_handler(CommandHandler("botInfo",getBotInfo))
+    dp.add_handler(CommandHandler('start',start))
+    dp.add_handler(CommandHandler('grafica',grafica))
+    dp.add_handler(CommandHandler('calcular_ingresos',suma))
+    dp.add_handler(CommandHandler('ingresar_gasto',ingresar_gasto))
+    dp.add_handler(CommandHandler('ver_gastos',ver_gastos))
+    dp.add_handler(CommandHandler('ver_sueldos',ver_sueldos))
+    dp.add_handler(CommandHandler('calcular_gastos',calcular_gastos))
+    dp.add_handler(CommandHandler('ingresar_sueldo',ingresar_sueldo))
+    #dp.add_handler(CommandHandler('ingresos_mes',ingresos_mes))
+    dp.add_handler(CommandHandler("help",help))
+    dp.add_handler(MessageHandler(Filters.status_update.new_chat_members, welcomeMsg))
+    #dp.add_handler(MessageHandler(Filters.text, echo))
+
+    updater.start_polling() #estar preguntando por mensajes entrantes
+    print("BOT RUNNING")
+    updater.idle()  #es para terminar el bot con ctrl + c
